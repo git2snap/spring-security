@@ -27,12 +27,14 @@ import javax.servlet.http.HttpServletResponse;
 import org.springframework.security.authentication.AuthenticationTrustResolver;
 import org.springframework.security.authentication.AuthenticationTrustResolverImpl;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.AuthenticationFailureHandler;
 import org.springframework.security.web.authentication.SimpleUrlAuthenticationFailureHandler;
 import org.springframework.security.web.authentication.session.SessionAuthenticationException;
 import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
 import org.springframework.security.web.authentication.session.SessionFixationProtectionStrategy;
+import org.springframework.security.web.context.HttpRequestResponseHolder;
 import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.util.Assert;
 import org.springframework.web.filter.GenericFilterBean;
@@ -87,7 +89,8 @@ public class SessionManagementFilter extends GenericFilterBean {
 
 		request.setAttribute(FILTER_APPLIED, Boolean.TRUE);
 
-		if (!securityContextRepository.containsContext(request)) {
+
+		if (!isAuthenticationStateAssignedToRequest(request, response)) {
 			Authentication authentication = SecurityContextHolder.getContext()
 					.getAuthentication();
 
@@ -137,6 +140,7 @@ public class SessionManagementFilter extends GenericFilterBean {
 		chain.doFilter(request, response);
 	}
 
+
 	/**
 	 * Sets the strategy which will be invoked instead of allowing the filter chain to
 	 * prceed, if the user agent requests an invalid session Id. If the property is not
@@ -172,5 +176,35 @@ public class SessionManagementFilter extends GenericFilterBean {
 	public void setTrustResolver(AuthenticationTrustResolver trustResolver) {
 		Assert.notNull(trustResolver, "trustResolver cannot be null");
 		this.trustResolver = trustResolver;
+	}
+
+	/**
+	 * Check if there exists already a security context for the request which
+	 * has already set an (not empty) authentication state
+	 * @param request the request which is assigned to the state
+	 * @param response is needed to get the context from the security context repository
+	 * @return true if there is an security context assign for the request with an not
+	 * empty authentication
+     */
+	private boolean isAuthenticationStateAssignedToRequest(HttpServletRequest request, HttpServletResponse response) {
+		final boolean securityContextContainsAuthentication;
+
+		// trivial case if there is no context, it will not contain a authentication
+		if(!this.securityContextRepository.containsContext(request))  {
+			securityContextContainsAuthentication = false;
+		}
+		// otherwise load context and check for an none empty state
+		else  {
+			final HttpRequestResponseHolder requestResponseHolder = new HttpRequestResponseHolder(request, response);
+			final SecurityContext securityContext = this.securityContextRepository.loadContext(requestResponseHolder);
+			if(securityContext == null)  {
+				securityContextContainsAuthentication = false;
+			}
+			else  {
+				final Authentication authentication = securityContext.getAuthentication();
+				securityContextContainsAuthentication = authentication != null;
+			}
+		}
+		return securityContextContainsAuthentication;
 	}
 }

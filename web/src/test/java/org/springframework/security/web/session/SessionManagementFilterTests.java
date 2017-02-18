@@ -16,6 +16,7 @@
 package org.springframework.security.web.session;
 
 import static org.assertj.core.api.Assertions.*;
+import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.*;
 
 import javax.servlet.FilterChain;
@@ -30,10 +31,12 @@ import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.authentication.AuthenticationTrustResolver;
 import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.web.authentication.AuthenticationFailureHandler;
 import org.springframework.security.web.authentication.session.SessionAuthenticationException;
 import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
+import org.springframework.security.web.context.HttpRequestResponseHolder;
 import org.springframework.security.web.context.SecurityContextRepository;
 
 /**
@@ -61,12 +64,20 @@ public class SessionManagementFilterTests {
 	}
 
 	@Test
-	public void strategyIsNotInvokedIfSecurityContextAlreadyExistsForRequest()
+	public void strategyIsNotInvokedIfSecurityContextWithAuthenticationAlreadyExistsForRequest()
 			throws Exception {
 		SecurityContextRepository repo = mock(SecurityContextRepository.class);
 		SessionAuthenticationStrategy strategy = mock(SessionAuthenticationStrategy.class);
+		SecurityContext securityContextFromRepository = mock(SecurityContext.class);
+		Authentication authentication = mock(Authentication.class);
+
 		// mock that repo contains a security context
 		when(repo.containsContext(any(HttpServletRequest.class))).thenReturn(true);
+
+		// give back an security context which has an not empty authentication
+		when(repo.loadContext(any(HttpRequestResponseHolder.class))).thenReturn(securityContextFromRepository);
+		when(securityContextFromRepository.getAuthentication()).thenReturn(authentication);
+
 		SessionManagementFilter filter = new SessionManagementFilter(repo, strategy);
 		HttpServletRequest request = new MockHttpServletRequest();
 		authenticateUser();
@@ -74,6 +85,33 @@ public class SessionManagementFilterTests {
 		filter.doFilter(request, new MockHttpServletResponse(), new MockFilterChain());
 
 		verifyZeroInteractions(strategy);
+	}
+
+	@Test
+	public void strategyIsInvokedIfSecurityContextWithoutAuthenticationAlreadyExistsForRequest()
+		throws Exception {
+		SecurityContextRepository repo = mock(SecurityContextRepository.class);
+		SessionAuthenticationStrategy strategy = mock(SessionAuthenticationStrategy.class);
+		SecurityContext securityContextFromRepository = mock(SecurityContext.class);
+
+		// mock that repo contains a security context
+		when(repo.containsContext(any(HttpServletRequest.class))).thenReturn(true);
+
+		// give back an security context which has an empty authentication
+		when(repo.loadContext(any(HttpRequestResponseHolder.class))).thenReturn(securityContextFromRepository);
+		when(securityContextFromRepository.getAuthentication()).thenReturn(null);
+
+		SessionManagementFilter filter = new SessionManagementFilter(repo, strategy);
+		HttpServletRequest request = new MockHttpServletRequest();
+		authenticateUser();
+
+		filter.doFilter(request, new MockHttpServletResponse(), new MockFilterChain());
+
+		verify(strategy).onAuthentication(any(Authentication.class),
+			any(HttpServletRequest.class), any(HttpServletResponse.class));
+		// Check that it is only applied once to the request
+		filter.doFilter(request, new MockHttpServletResponse(), new MockFilterChain());
+		verifyNoMoreInteractions(strategy);
 	}
 
 	@Test
@@ -168,6 +206,8 @@ public class SessionManagementFilterTests {
 		filter.setTrustResolver(trustResolver);
 		HttpServletRequest request = new MockHttpServletRequest();
 		authenticateUser();
+
+		//given(repo.containsContext(request)).willReturn(true);
 
 		filter.doFilter(request, new MockHttpServletResponse(), new MockFilterChain());
 
